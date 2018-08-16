@@ -1,26 +1,8 @@
-FROM nginx:1.13
-MAINTAINER NGINX Amplify Engineering
+FROM nginx:1.13.6-alpine
 
-# Install the NGINX Amplify Agent
-RUN apt-get update \
-    && apt-get install -qqy curl python apt-transport-https apt-utils gnupg1 procps \
-    && echo 'deb https://packages.amplify.nginx.com/debian/ stretch amplify-agent' > /etc/apt/sources.list.d/nginx-amplify.list \
-    && curl -fs https://nginx.org/keys/nginx_signing.key | apt-key add - > /dev/null 2>&1 \
-    && apt-get update \
-    && apt-get install -qqy nginx-amplify-agent \
-    && apt-get purge -qqy curl apt-transport-https apt-utils gnupg1 \
-    && rm -rf /var/lib/apt/lists/*
+LABEL maintainer="Vuong Pham <kingdom102@gmail.com>"
 
-# Keep the nginx logs inside the container
-RUN unlink /var/log/nginx/access.log \
-    && unlink /var/log/nginx/error.log \
-    && touch /var/log/nginx/access.log \
-    && touch /var/log/nginx/error.log \
-    && chown nginx /var/log/nginx/*log \
-    && chmod 644 /var/log/nginx/*log
-
-# Copy nginx stub_status config
-COPY ./conf.d/stub_status.conf /etc/nginx/conf.d
+ENV NGINX_AMPLIFY_VERSION 1.0.0
 
 # API_KEY is required for configuring the NGINX Amplify Agent.
 # It could be your real API key for NGINX Amplify here if you wanted
@@ -28,7 +10,7 @@ COPY ./conf.d/stub_status.conf /etc/nginx/conf.d
 # However, including private keys in the Dockerfile is not recommended.
 # Use the environment variables at runtime as described below.
 
-#ENV API_KEY 1234567890
+ENV API_KEY 1234567890
 
 # If AMPLIFY_IMAGENAME is set, the startup wrapper script will use it to
 # generate the 'imagename' to put in the /etc/amplify-agent/agent.conf
@@ -38,15 +20,54 @@ COPY ./conf.d/stub_status.conf /etc/nginx/conf.d
 # AMPLIFY_IMAGENAME can also be passed to the instance at runtime as
 # described below.
 
-#ENV AMPLIFY_IMAGENAME my-docker-instance-123
+ENV AMPLIFY_IMAGENAME "<imagename>"
 
-# The /entrypoint.sh script will launch nginx and the Amplify Agent.
-# The script honors API_KEY and AMPLIFY_IMAGENAME environment
-# variables, and updates /etc/amplify-agent/agent.conf accordingly.
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache \
+        ca-certificates \
+        wget \
+        python \
+        python-dev \
+        py-configobj \
+        git \
+        util-linux \
+        procps \
+        gcc \
+        musl-dev \
+        linux-headers && \
+        wget -q --no-check-certificate https://bootstrap.pypa.io/get-pip.py && \
+            python get-pip.py --ignore-installed --user && \
+            ~/.local/bin/pip install setuptools --upgrade --user && \
+            rm -rf nginx-amplify-agent && \
+            git clone "https://github.com/nginxinc/nginx-amplify-agent" && \
+            cd nginx-amplify-agent && \
+            ~/.local/bin/pip install --upgrade \
+                --target=amplify --no-compile \
+                -r packages/requirements && \
+            python setup.py install && \
+            cp nginx-amplify-agent.py /usr/bin && \
+            mkdir -p /var/log/amplify-agent && \
+            chmod 755 /var/log/amplify-agent && \
+            mkdir -p /var/run/amplify-agent && \
+            chmod 755 /var/run/amplify-agent && \
+            rm -rf ~/.local && \
+            apk del \
+                ca-certificates \
+                wget \
+                python-dev \
+                py-configobj \
+                git \
+                gcc \
+                musl-dev \
+                linux-headers &&\
+                rm -rf /var/cache/apk/* &&\
+                mkdir -p /etc/amplify-agent
 
+
+COPY ./conf.d/agent.conf /etc/amplify-agent/agent.conf
 COPY ./entrypoint.sh /entrypoint.sh
-
-# TO set/override API_KEY and AMPLIFY_IMAGENAME when starting an instance:
-# docker run --name my-nginx1 -e API_KEY='..effc' -e AMPLIFY_IMAGENAME="service-name" -d nginx-amplify
+RUN chmod +x /entrypoint.sh; \
+    chmod +r /proc;
 
 ENTRYPOINT ["/entrypoint.sh"]
